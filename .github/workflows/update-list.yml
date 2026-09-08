@@ -1,7 +1,12 @@
 name: Update List
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/15 13-21 * * *'
+    
+    # 2. Run once an hour (at minute 0) from 5:00 PM to 8:00 AM UTC (17:00 - 09:00)
+    # Broken into overnight/early morning and evening blocks:
+    - cron: '0 0-12 * * *'
+    - cron: '0 22-23 * * *'
   workflow_dispatch:
 
 permissions:
