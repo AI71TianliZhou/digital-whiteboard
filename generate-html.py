@@ -224,7 +224,7 @@ for chore in active_tasks:
 
     if status == 1:
         tooltip = f"Current focus: {label_text}" if label_text else "Current focus"
-        icon = f'<img src="{matrix_gif}" alt="" style="height: clamp(1rem, 2.5vw, 1.75rem);">'
+        icon = f'<img src="{matrix_gif}" alt="" style="height: clamp(1rem, 2.5vw, 1.1rem);">'
     elif status == 2:
         tooltip = f"Paused: {label_text}" if label_text else "Paused"
         icon = "<span>&#128218;</span>"
