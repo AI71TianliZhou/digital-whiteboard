@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Josh's digital whiteboard</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;600;700&family=Mr+Dafoe&family=Rock+Salt&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --pico-background-color: #141e14;
+            --pico-color: #f4ebd9;
+            --pico-text-color: #f4ebd9;
+            --pico-card-background-color: #1f3025;
+            --pico-card-border-color: #2d4536;
+            --pico-primary: #a8d5a2;
+            --pico-primary-hover: #b8e5b2;
+            --pico-primary-background: #2a4a2a;
+            --pico-border-color: #2d4536;
+            --pico-del-color: #7a7a6e;
+            --pico-h1-color: #f4ebd9;
+            --pico-accordion-border-color: #2d4536;
+            --pico-font-family: "Caveat", cursive;
+            --pico-font-size: clamp(1.2rem, 2.5vw, 2rem);
+            --pico-line-height: 1.5;
+        }
+        *,
+        body,
+        h1,
+        h2,
+        h3,
+        button,
+        input {
+            text-shadow: 0 0 1px rgba(255, 255, 255, 0.3), 0 0 2px rgba(255, 255, 255, 0.2);
+        }
+        html, body {
+            min-height: 100vh;
+        }
+        main.container {
+            padding-top: 5rem;
+        }
+        article { background: #1f3025; }
+        hgroup { margin-bottom: var(--pico-spacing); }
+        h1 { font-family: "Mr Dafoe", cursive; font-size: clamp(2.5rem, 5vw, 4rem); }
+        #sync-status {
+            position: fixed;
+            top: calc(var(--pico-spacing));
+            right: calc(var(--pico-spacing));
+            z-index: 1000;
+            text-align: right;
+            background: #c8a03e;
+            color: #2a1e1a;
+            padding: 0.5rem 0.5rem 0rem;
+            border-radius: 2px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+            transform: rotate(1deg);
+            font-family: "Rock Salt", cursive;
+            font-size: clamp(0.7rem, 1.2vw, 1rem);
+            line-height: 1.6;
+        }
+        #sync-warning {
+            display: none;
+            color: #e8a07a;
+            font-weight: 700;
+            font-family: "Rock Salt", cursive;
+        }
+        ul { list-style: none; padding: 0; margin: 0; }
+        li { list-style-type: none; padding: 0; margin: 0; }
+        li::marker { content: none; }
+        [data-tooltip] { 
+            cursor: default;
+            border-bottom: none !important;
+            text-decoration: none !important;
+            padding:0.25rem;
+        }
+        div[data-tooltip] { 
+            cursor: default;
+            border-bottom: none !important;
+            text-decoration: none !important;
+            padding:0;
+        }
+        .icon-cell {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+        .icon-cell img { vertical-align: middle; }
+        details[open] > summary { margin-bottom: 0.5rem; }
+        details[open] > summary,
+        details:not([open]) > summary { color: inherit; }
+        details.completed summary {
+            color: var(--pico-del-color);
+            font-style: italic;
+        }
+        details.completed summary del { color: var(--pico-del-color); }
+        del { color: var(--pico-del-color); }
+        .grid { margin-top: 0.25rem; }
+    </style>
+</head>
+<body>
+    <main class="container">
+        <div id="sync-status">
+            <div role="group">
+                <div id="sync-warning" data-tooltip="Potentially out of sync" data-placement="left">
+                    &#9888;&#65039;
+                </div>
+                <div>
+                    Last synced: <span id="sync-counter">Calculating...</span>
+                </div>
+            </div>
+        </div>
+
+        <div>
+            <h2 data-tooltip="Josh is a single thread processor" data-placement="right" style="display: inline-block; padding-right:1rem;">&#129683;</h2>
+            <h1 style="display: inline-block;">Josh's Task Ingestion Queue</h1>
+        </div>
+
+        <article>
+            <ul>
+{active_tasks_html}
+            </ul>
+
+{completed_tasks_html}
+        </article>
+
+        <script>
+            const lastSyncEpoch = {sync_epoch};
+
+            function checkSyncStatus() {
+                const nowSeconds = Math.floor(Date.now() / 1000);
+                const diffSeconds = nowSeconds - lastSyncEpoch;
+                const minutes = Math.floor(diffSeconds / 60);
+                const seconds = diffSeconds % 60;
+
+                const counter = document.getElementById("sync-counter");
+                if (minutes >= 60) {
+                    const hours = Math.floor(minutes / 60);
+                    const remainingMins = minutes % 60;
+                    counter.innerText = `${hours}h ${remainingMins}m ${seconds}s ago`;
+                } else {
+                    counter.innerText = `${minutes}m ${seconds}s ago`;
+                }
+
+                const warning = document.getElementById("sync-warning");
+                if (diffSeconds >= 30 * 60) {
+                    warning.style.display = "block";
+                } else {
+                    warning.style.display = "none";
+                }
+            }
+
+            setInterval(checkSyncStatus, 1000);
+            checkSyncStatus();
+        </script>
+    </main>
+</body>
+</html>

@@ -29,6 +29,17 @@ BASE_HEADERS = {
     "Referer": "https://app.donetick.com/",
 }
 
+PRIORITY_NAMES = {
+    0: None,
+    1: "Top priority",
+    2: "High priority",
+    3: "Medium priority",
+    4: "Low priority",
+}
+
+# Label sort: within ongoing, no label > in review > outdated > blocked
+LABEL_SORT_ORDER = {"in review": 1, "outdated": 2, "blocked": 3}
+
 
 def fetch_tasks(token):
     headers = BASE_HEADERS.copy()
@@ -58,6 +69,50 @@ def update_github_secret(new_secret_value):
     put_data = {"encrypted_value": encrypted_b64, "key_id": key_data["key_id"]}
     httpx.put(put_url, headers=gh_headers, json=put_data).raise_for_status()
     print("Successfully updated GitHub Secret.")
+
+
+def format_date(iso_str):
+    """Convert '2026-09-07T06:29:06.975338Z' to 'Sep 7, 06:29'."""
+    if not iso_str or len(iso_str) < 16:
+        return ""
+    date_part = iso_str[:10]
+    time_part = iso_str[11:16]
+    parts = date_part.split("-")
+    if len(parts) != 3:
+        return ""
+    months = [
+        "",
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+    ]
+    month = months[int(parts[1])] if 1 <= int(parts[1]) <= 12 else parts[1]
+    day = int(parts[2])
+    return f"{month} {day}, {time_part}"
+
+
+def render_label_pills(labels_raw):
+    """Render <span> badges for each label with its color."""
+    parts = []
+    for lbl in labels_raw:
+        name = lbl.get("name", "")
+        color = lbl.get("color", "")
+        if not name:
+            continue
+        style = (
+            f"background:{color};color:#fff;padding:0 0.3rem;border-radius:3px;margin-right:0.2rem"
+        )
+        parts.append(f'<span style="{style}">{html.escape(name)}</span>')
+    return " ".join(parts)
 
 
 # --- Execution Logic ---
@@ -96,6 +151,16 @@ chores = data.get("changes", {}).get("chores", [])
 # --- Build structured chore objects ---
 chore_objects = []
 for chore in chores:
+    labels_raw = chore.get("labelsV2", []) or []
+    label_names = [lbl["name"] for lbl in labels_raw if lbl.get("name")]
+    # Precedence: use first label's color for text color
+    text_color = ""
+    for lbl in labels_raw:
+        if lbl.get("name") and lbl.get("color"):
+            # Skip if it's a known label name, use its color
+            text_color = lbl["color"]
+            break
+
     chore_objects.append(
         {
             "name": chore.get("name", "Untitled Task"),
@@ -103,19 +168,30 @@ for chore in chores:
             "status": chore.get("status", 0),
             "priority": chore.get("priority", 0) or 0,
             "isActive": chore.get("isActive", True),
+            "labels": label_names,
+            "labels_raw": labels_raw,
+            "text_color": text_color,
         }
     )
 
 
+def label_sort_key(chore):
+    """Label priority within ongoing tasks: no label < in review < outdated < blocked."""
+    for name in ["blocked", "outdated", "in review"]:
+        if name in chore["labels"]:
+            return LABEL_SORT_ORDER[name]
+    return 0
+
+
 def active_group(chore):
-    """Primary sort: ongoing < paused < not-started < completed."""
+    """Primary sort: ongoing (subsorted by label) < paused < not-started < completed."""
     if not chore["isActive"]:
         return 99
     if chore["status"] == 1:
-        return 0
+        return label_sort_key(chore)
     if chore["status"] == 2:
-        return 1
-    return 2
+        return 20
+    return 30
 
 
 # Stable sort in reverse precedence: tertiary -> secondary -> primary
@@ -125,215 +201,106 @@ chore_objects.sort(key=active_group)
 
 # --- HTML Generation ---
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+template_path = os.path.join(SCRIPT_DIR, "index.html.template")
+with open(template_path, encoding="utf-8") as f:
+    template = f.read()
+
 matrix_gif = "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/7e/Digital_rain_animation_big_letters_clear.gif/250px-Digital_rain_animation_big_letters_clear.gif"
 
 active_tasks = [c for c in chore_objects if c["isActive"]]
 completed_tasks = [c for c in chore_objects if not c["isActive"]]
 
-html_parts = [
-    "<!DOCTYPE html>",
-    '<html lang="en" data-theme="dark">',
-    "<head>",
-    '    <meta charset="UTF-8">',
-    '    <meta name="viewport" content="width=device-width, initial-scale=1.0">',
-    "    <title>Josh's digital whiteboard</title>",
-    '    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">',
-    '    <link rel="preconnect" href="https://fonts.googleapis.com">',
-    '    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>',
-    '    <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;600;700&family=Mr+Dafoe&family=Rock+Salt&display=swap" rel="stylesheet">',
-    "    <style>",
-    "        :root {",
-    "            --pico-background-color: #141e14;",
-    "            --pico-color: #f4ebd9;",
-    "            --pico-text-color: #f4ebd9;",
-    "            --pico-card-background-color: #1f3025;",
-    "            --pico-card-border-color: #2d4536;",
-    "            --pico-primary: #a8d5a2;",
-    "            --pico-primary-hover: #b8e5b2;",
-    "            --pico-primary-background: #2a4a2a;",
-    "            --pico-border-color: #2d4536;",
-    "            --pico-del-color: #7a7a6e;",
-    "            --pico-h1-color: #f4ebd9;",
-    "            --pico-accordion-border-color: #2d4536;",
-    '            --pico-font-family: "Caveat", cursive;',
-    "            --pico-font-size: clamp(1.2rem, 2.5vw, 2rem);",
-    "            --pico-line-height: 1.5;",
-    "        }",
-    "        *,",
-    "        body,",
-    "        h1,",
-    "        h2,",
-    "        h3,",
-    "        button,",
-    "        input {",
-    "            text-shadow: 0 0 1px rgba(255, 255, 255, 0.3), 0 0 2px rgba(255, 255, 255, 0.2);",
-    "        }",
-    "        html, body {",
-    "            min-height: 100vh;",
-    "        }",
-    "        article { background: #1f3025; }",
-    "        hgroup { margin-bottom: var(--pico-spacing); }",
-    '        h1 { font-family: "Mr Dafoe", cursive; font-size: clamp(2.5rem, 5vw, 4rem); }',
-    "        #sync-status {",
-    "            position: fixed;",
-    "            top: calc(var(--pico-spacing));",
-    "            right: calc(var(--pico-spacing));",
-    "            z-index: 1000;",
-    "            text-align: right;",
-    "            background: #c8a03e;",
-    "            color: #2a1e1a;",
-    "            padding: 0.5rem 0.75rem;",
-    "            border-radius: 2px;",
-    "            box-shadow: 0 2px 8px rgba(0,0,0,0.4);",
-    "            transform: rotate(1deg);",
-    '            font-family: "Rock Salt", cursive;',
-    "            font-size: clamp(0.7rem, 1.2vw, 1rem);",
-    "            line-height: 1.6;",
-    "        }",
-    "        #sync-warning {",
-    "            display: none;",
-    "            color: #e8a07a;",
-    "            font-weight: 700;",
-    "            background: #2a1e1a;",
-    "            padding: 0.15rem 0.4rem;",
-    "            border-radius: var(--pico-border-radius);",
-    "            margin-top: 0.25rem;",
-    '            font-family: "Rock Salt", cursive;',
-    "        }",
-    "        ul { list-style: none; padding: 0; }",
-    "        li { padding: 0.15rem 0 0.15rem 0.5rem; }",
-    "        li[data-tooltip] {",
-    "            cursor: default;",
-    "        }",
-    "        .icon-cell {",
-    "            display: inline-flex;",
-    "            align-items: center;",
-    "            gap: 0.6rem;",
-    "        }",
-    "        .icon-cell img { vertical-align: middle; }",
-    "        details[open] summary { margin-bottom: var(--pico-spacing); }",
-    "        details.completed summary {",
-    "            color: var(--pico-del-color);",
-    "            font-style: italic;",
-    "        }",
-    "        del { color: var(--pico-del-color); }",
-    "        ul { margin-bottom: 0; }",
-    "    </style>",
-    "</head>",
-    "<body>",
-    '    <main class="container">',
-]
-
-# Floating timer + warning container
-html_parts.extend(
-    [
-        '        <div id="sync-status">',
-        '            <div>Time since last sync: <span id="sync-counter">Calculating...</span></div>',
-        '            <div id="sync-warning">',
-        "                &#9888;&#65039; Out of sync — poke Josh to fix the proxy.",
-        "            </div>",
-        "        </div>",
-    ]
-)
-
-html_parts.append("        <hgroup>")
-html_parts.append("            <h1>&#128203; Josh's Task List</h1>")
-html_parts.append("        </hgroup>")
-
-# Active + completed in one article
-html_parts.append("        <article>")
-
-# Active tasks
-html_parts.append("            <ul>")
-
+active_parts = []
 for chore in active_tasks:
     title = html.escape(chore["name"])
     status = chore["status"]
+    date_fmt = format_date(chore["updatedAt"])
+    priority_name = PRIORITY_NAMES.get(chore["priority"], "")
+    label_badges = render_label_pills(chore["labels_raw"])
+    text_color = chore["text_color"]
+    color_style = f' style="color:{text_color}"' if text_color else ""
+    label_text = ", ".join(chore["labels"]) if chore["labels"] else ""
+
     if status == 1:
-        html_parts.append(
-            f'                <li data-tooltip="Current focus" data-placement="left">'
-            f'<span class="icon-cell">'
-            f'<img src="{matrix_gif}" alt="" width="20">'
-            f"<span>{title}</span>"
-            f"</span></li>"
-        )
+        tooltip = f"Current focus: {label_text}" if label_text else "Current focus"
+        icon = f'<img src="{matrix_gif}" alt="" style="height: clamp(1rem, 2.5vw, 1.75rem);">'
     elif status == 2:
-        html_parts.append(
-            f'                <li data-tooltip="Paused" data-placement="left">'
-            f'<span class="icon-cell">'
-            f"<span>&#128218;</span>"
-            f"<span>{title}</span>"
-            f"</span></li>"
-        )
+        tooltip = f"Paused: {label_text}" if label_text else "Paused"
+        icon = "<span>&#128218;</span>"
     else:
-        html_parts.append(
-            f'                <li data-tooltip="New" data-placement="left">'
-            f'<span class="icon-cell">'
-            f"<span>&#10024;</span>"
-            f"<span>{title}</span>"
-            f"</span></li>"
-        )
+        tooltip = f"New: {label_text}" if label_text else "New"
+        icon = "<span>&#10024;</span>"
 
-html_parts.append("            </ul>")
+    grid_cells = []
+    if date_fmt:
+        grid_cells.append(f"<div><small>Updated: {date_fmt}</small></div>")
+    if priority_name:
+        grid_cells.append(f"<div><small>Priority: {priority_name}</small></div>")
+    if label_badges:
+        grid_cells.append(f"<div><small>{label_badges}</small></div>")
 
-# Completed tasks accordion
+    grid_html = f'<div class="grid">{"".join(grid_cells)}</div>' if grid_cells else ""
+    if not grid_html:
+        grid_html = '<div class="grid"><div><small>&nbsp;</small></div></div>'
+
+    active_parts.append(
+        f"                <li>"
+        f"<details>"
+        f'<summary>'
+        f'<span class="icon-cell" data-tooltip="{tooltip}" data-placement="right">'
+        f"{icon}"
+        f"<span{color_style}>{title}</span>"
+        f"</span>"
+        f"</summary>"
+        f"{grid_html}"
+        f"</details>"
+        f"</li>"
+    )
+
+completed_parts = []
 if completed_tasks:
-    html_parts.append('            <details class="completed" name="completed" style="padding-top: 0.5rem">')
-    html_parts.append("                <summary>Completed tasks</summary>")
-    html_parts.append("                <ul>")
+    completed_parts.append(
+        '            <details class="completed" name="completed" style="padding-top: 0.5rem">'
+    )
+    completed_parts.append("                <summary>Completed tasks</summary>")
+    completed_parts.append("                <ul>")
     for chore in completed_tasks:
         title = html.escape(chore["name"])
-        html_parts.append(
-            f'                    <li data-tooltip="Completed" data-placement="left">'
+        date_fmt = format_date(chore["updatedAt"])
+        label_badges = render_label_pills(chore["labels_raw"])
+        text_color = chore["text_color"]
+        color_style = f' style="color:{text_color}"' if text_color else ""
+
+        grid_cells = []
+        if date_fmt:
+            grid_cells.append(f"<div><small>Completed: {date_fmt}</small></div>")
+        if label_badges:
+            grid_cells.append(f"<div><small>{label_badges}</small></div>")
+
+        grid_html = f'<div class="grid">{"".join(grid_cells)}</div>' if grid_cells else ""
+
+        completed_parts.append(
+            f'                    <li data-tooltip="Completed" data-placement="right">'
+            f"<details>"
+            f"<summary>"
             f'<span class="icon-cell">'
             f"<span>&#128674;</span>"
-            f"<del>{title}</del>"
-            f"</span></li>"
+            f"<del{color_style}>{title}</del>"
+            f"</span>"
+            f"</summary>"
+            f"{grid_html}"
+            f"</details>"
+            f"</li>"
         )
-    html_parts.append("                </ul>")
-    html_parts.append("            </details>")
+    completed_parts.append("                </ul>")
+    completed_parts.append("            </details>")
 
-html_parts.append("        </article>")
-
-# Script
-html_parts.extend(
-    [
-        "        <script>",
-        f"            const lastSyncEpoch = {int(time())};",
-        "",
-        "            function checkSyncStatus() {",
-        "                const nowSeconds = Math.floor(Date.now() / 1000);",
-        "                const diffSeconds = nowSeconds - lastSyncEpoch;",
-        "                const minutes = Math.floor(diffSeconds / 60);",
-        "                const seconds = diffSeconds % 60;",
-        "",
-        '                const counter = document.getElementById("sync-counter");',
-        "                if (minutes >= 60) {",
-        "                    const hours = Math.floor(minutes / 60);",
-        "                    const remainingMins = minutes % 60;",
-        "                    counter.innerText = `${hours}h ${remainingMins}m ${seconds}s ago`;",
-        "                } else {",
-        "                    counter.innerText = `${minutes}m ${seconds}s ago`;",
-        "                }",
-        "",
-        '                const warning = document.getElementById("sync-warning");',
-        "                if (diffSeconds >= 30 * 60) {",
-        '                    warning.style.display = "block";',
-        "                } else {",
-        '                    warning.style.display = "none";',
-        "                }",
-        "            }",
-        "",
-        "            setInterval(checkSyncStatus, 1000);",
-        "            checkSyncStatus();",
-        "        </script>",
-        "    </main>",
-        "</body>",
-        "</html>",
-    ]
+html_content = (
+    template.replace("{active_tasks_html}", "\n".join(active_parts))
+    .replace("{completed_tasks_html}", "\n".join(completed_parts))
+    .replace("{sync_epoch}", str(int(time())))
 )
-
-html_content = "\n".join(html_parts)
 
 os.makedirs("public", exist_ok=True)
 with open("public/index.html", "w", encoding="utf-8") as f:
